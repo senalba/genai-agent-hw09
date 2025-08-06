@@ -1,0 +1,31 @@
+# Use an official Python runtime as a parent image
+FROM python:3.10-slim
+
+# Set environment variables to prevent writing .pyc files and to run in unbuffered mode
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Create a non-root user and group
+RUN addgroup --system app && adduser --system --group app
+
+# Copy the requirements file into the container at /app
+COPY --chown=app:app ./requirements.txt /app/
+
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application's code into the container
+COPY --chown=app:app . /app/
+
+# Switch to the non-root user
+USER app
+
+# Run uvicorn server
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
