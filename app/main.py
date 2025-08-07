@@ -1,5 +1,6 @@
 import logging
 import tempfile
+import os
 from typing import Literal
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
@@ -37,15 +38,16 @@ async def index_pdf(
     - 'replace': Clears the existing context and indexes the new PDF.
     - 'add': Adds the new PDF to the existing context.
     """
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await pdf_file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
+
         logger.info(f"PDF file '{pdf_file.filename}' saved to temporary path: {tmp_path}")
         split_docs = load_and_split_pdf(tmp_path)
-        
+
         if mode == "replace":
             logger.info("Mode: 'replace'. Clearing existing vector store and creating a new one.")
             clear_vector_store()
@@ -55,23 +57,28 @@ async def index_pdf(
             if state.vector_store is None:
                 logger.info("No existing vector store in memory, loading from disk.")
                 state.vector_store = get_vector_store()
-            
+
             state.vector_store.add_documents(split_docs)
             logger.info(f"Added {len(split_docs)} new document chunks.")
-        
+
         # Always recreate the agent to use the updated retriever from the vector store
         state.agent_executor = create_agent(state.vector_store)
-        
+
         # This state is now ambiguous as it only tracks the last uploaded PDF.
         # The tools relying on it will only work for the last file.
         # This is a known limitation of the current tool design.
         state.indexed_pdf_path = tmp_path
-        
+
         logger.info("PDF indexed and agent updated successfully.")
         return {"message": f"PDF '{pdf_file.filename}' indexed successfully in '{mode}' mode."}
     except Exception as e:
         logger.error(f"Error indexing PDF: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to index PDF: {e}")
+    finally:
+        # Ensure the temporary file is cleaned up
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            logger.info(f"Cleaned up temporary file: {tmp_path}")
 
 @app.post("/query", summary="Query the Agent")
 async def query_agent(request: QueryRequest):
